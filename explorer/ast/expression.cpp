@@ -40,11 +40,12 @@ auto IntrinsicExpression::FindIntrinsic(std::string_view name,
        {"int_left_shift", Intrinsic::IntLeftShift},
        {"int_right_shift", Intrinsic::IntRightShift},
        {"str_eq", Intrinsic::StrEq},
-       {"str_compare", Intrinsic::StrCompare}});
+       {"str_compare", Intrinsic::StrCompare},
+       {"assert", Intrinsic::Assert}});
   name.remove_prefix(std::strlen("__intrinsic_"));
   auto it = intrinsic_map.find(name);
   if (it == intrinsic_map.end()) {
-    return CompilationError(source_loc) << "Unknown intrinsic '" << name << "'";
+    return ProgramError(source_loc) << "Unknown intrinsic '" << name << "'";
   }
   return it->second;
 }
@@ -80,6 +81,8 @@ auto IntrinsicExpression::name() const -> std::string_view {
       return "__intrinsic_str_eq";
     case IntrinsicExpression::Intrinsic::StrCompare:
       return "__intrinsic_str_compare";
+    case IntrinsicExpression::Intrinsic::Assert:
+      return "__intrinsic_assert";
   }
 }
 
@@ -120,6 +123,8 @@ auto ToString(Operator op) -> std::string_view {
       return "<<";
     case Operator::BitShiftRight:
       return ">>";
+    case Operator::Div:
+      return "/";
     case Operator::Neg:
     case Operator::Sub:
       return "-";
@@ -129,6 +134,8 @@ auto ToString(Operator op) -> std::string_view {
       return "*";
     case Operator::Not:
       return "not";
+    case Operator::NotEq:
+      return "!=";
     case Operator::And:
       return "and";
     case Operator::Or:
@@ -250,9 +257,10 @@ void Expression::Print(llvm::raw_ostream& out) const {
       }
       break;
     }
-    case ExpressionKind::InstantiateImpl: {
-      const auto& inst_impl = cast<InstantiateImpl>(*this);
-      out << "instantiate " << *inst_impl.generic_impl();
+    case ExpressionKind::BuiltinConvertExpression: {
+      // These don't represent source syntax, so just print the original
+      // expression.
+      out << *cast<BuiltinConvertExpression>(this)->source_expression();
       break;
     }
     case ExpressionKind::UnimplementedExpression: {
@@ -330,6 +338,7 @@ void Expression::PrintID(llvm::raw_ostream& out) const {
     case ExpressionKind::CompoundMemberAccessExpression:
     case ExpressionKind::IfExpression:
     case ExpressionKind::WhereExpression:
+    case ExpressionKind::BuiltinConvertExpression:
     case ExpressionKind::TupleLiteral:
     case ExpressionKind::StructLiteral:
     case ExpressionKind::StructTypeLiteral:
@@ -339,7 +348,6 @@ void Expression::PrintID(llvm::raw_ostream& out) const {
     case ExpressionKind::UnimplementedExpression:
     case ExpressionKind::FunctionTypeLiteral:
     case ExpressionKind::ArrayTypeLiteral:
-    case ExpressionKind::InstantiateImpl:
       out << "...";
       break;
   }
@@ -350,13 +358,18 @@ WhereClause::~WhereClause() = default;
 void WhereClause::Print(llvm::raw_ostream& out) const {
   switch (kind()) {
     case WhereClauseKind::IsWhereClause: {
-      auto& clause = cast<IsWhereClause>(*this);
+      const auto& clause = cast<IsWhereClause>(*this);
       out << clause.type() << " is " << clause.constraint();
       break;
     }
     case WhereClauseKind::EqualsWhereClause: {
-      auto& clause = cast<EqualsWhereClause>(*this);
+      const auto& clause = cast<EqualsWhereClause>(*this);
       out << clause.lhs() << " == " << clause.rhs();
+      break;
+    }
+    case WhereClauseKind::RewriteWhereClause: {
+      const auto& clause = cast<RewriteWhereClause>(*this);
+      out << "." << clause.member_name() << " = " << clause.replacement();
       break;
     }
   }
